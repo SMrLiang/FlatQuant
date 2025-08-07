@@ -6,30 +6,31 @@ from termcolor import colored
 import pprint
 
 
-supported_models = [
-            './modelzoo/llama-2/llama-2-7b',
-            './modelzoo/llama-2/llama-2-13b',
-            './modelzoo/llama-2/llama-2-70b',
-            './modelzoo/llama-3/llama-3-8b',
-            './modelzoo/llama-3/llama-3-70b',
-            './modelzoo/llama-3.1/llama-3.1-8b',
-            './modelzoo/llama-3.1/llama-3.1-70b',
-            './modelzoo/llama-3.1-instruct/llama-3.1-instruct-8b',
-            './modelzoo/qwen-2.5-instruct/qwen-2.5-instruct-7b',
-            './modelzoo/qwen-2.5-instruct/qwen-2.5-instruct-32b',
-            ]
 # supported_models = [
-#             'meta-llama/Llama-2-7b-hf',
-#             'meta-llama/Llama-2-13b-hf',
-#             'meta-llama/Llama-2-70b-hf',
-#             'meta-llama/Meta-Llama-3-8B',
-#             'meta-llama/Meta-Llama-3-70B',
-#             'meta-llama/Llama-3.1-8B', 
-#             'meta-llama/Llama-3.1-70B', 
-#             'meta-llama/Llama-3.1-8B-Instruct', 
-#             'Qwen/Qwen2.5-32B-Instruct', 
-#             'Qwen/Qwen2.5-7B-Instruct', 
+#             './modelzoo/llama-2/llama-2-7b',
+#             './modelzoo/llama-2/llama-2-13b',
+#             './modelzoo/llama-2/llama-2-70b',
+#             './modelzoo/llama-3/llama-3-8b',
+#             './modelzoo/llama-3/llama-3-70b',
+#             './modelzoo/llama-3.1/llama-3.1-8b',
+#             './modelzoo/llama-3.1/llama-3.1-70b',
+#             './modelzoo/llama-3.1-instruct/llama-3.1-instruct-8b',
+#             './modelzoo/qwen-2.5-instruct/qwen-2.5-instruct-7b',
+#             './modelzoo/qwen-2.5-instruct/qwen-2.5-instruct-32b',
 #             ]
+supported_models = [
+            'meta-llama/Llama-2-7b-hf',
+            'meta-llama/Llama-2-13b-hf',
+            'meta-llama/Llama-2-70b-hf',
+            'meta-llama/Meta-Llama-3-8B',
+            'meta-llama/Meta-Llama-3-70B',
+            'meta-llama/Llama-3.1-8B', 
+            'meta-llama/Llama-3.1-70B', 
+            'meta-llama/Llama-3.1-8B-Instruct', 
+            'Qwen/Qwen2.5-32B-Instruct', 
+            'Qwen/Qwen2.5-7B-Instruct', 
+            '/home/liangyiheng/xten/models/internlm/internlm2_1_8b/hf'
+            ]
 supported_datasets = ['wikitext2', 'c4', 'pile']
 
 
@@ -70,7 +71,7 @@ def parser_gen():
 
     # FlatQuant calibration Arguments
     parser.add_argument('--epochs', type=int, default=15, help='Number of training epochs.')
-    parser.add_argument('--cali_dataset', type=str, default='wikitext2',
+    parser.add_argument('--cali_dataset', type=str, default='pile',
                         help='Calibration dataset for FlatQuant and GPTQ.', choices=supported_datasets)
     parser.add_argument('--nsamples', type=int, default=128,
                         help='Number of calibration data samples for FlatQuant and GPTQ.')

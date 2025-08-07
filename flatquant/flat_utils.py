@@ -30,13 +30,22 @@ def reparameterize_ln(ln, trans):
 def reparameterize_model(model):
     for idx in range(model.config.num_hidden_layers):
         layer = model.model.layers[idx]
-        layer.self_attn.reparameterize()
-        layer.mlp.reparameterize()
+        if hasattr(layer, 'self_attn') and hasattr(layer, 'mlp'):
+            layer.self_attn.reparameterize()
+            layer.mlp.reparameterize()
+            if layer.self_attn.ln_trans is not None and layer.self_attn.ln_trans.add_diag:
+                reparameterize_ln(layer.input_layernorm, layer.self_attn.ln_trans)
+            if layer.mlp.up_gate_trans is not None and layer.mlp.up_gate_trans.add_diag:
+                reparameterize_ln(layer.post_attention_layernorm, layer.mlp.up_gate_trans)
+        elif hasattr(layer, 'attention') and hasattr(layer, 'feed_forward'):
+            layer.attention.reparameterize()
+            layer.feed_forward.reparameterize()
+            if layer.attention.ln_trans is not None and layer.attention.ln_trans.add_diag:
+                reparameterize_ln(layer.attention_norm, layer.attention.ln_trans)
+            if layer.feed_forward.up_gate_trans is not None and layer.feed_forward.up_gate_trans.add_diag:
+                reparameterize_ln(layer.ffn_norm, layer.feed_forward.up_gate_trans)
         # fuse per-channel scaling to layernorm
-        if layer.self_attn.ln_trans is not None and layer.self_attn.ln_trans.add_diag:
-            reparameterize_ln(layer.input_layernorm, layer.self_attn.ln_trans)
-        if layer.mlp.up_gate_trans is not None and layer.mlp.up_gate_trans.add_diag:
-            reparameterize_ln(layer.post_attention_layernorm, layer.mlp.up_gate_trans)
+
     return model
 
 
@@ -66,8 +75,10 @@ def save_flat_matrices(args, model, rank=None):
     flat_matrices = {}
     for i in range(len(model.model.layers)):
         layer = model.model.layers[i]
-        layer.self_attn.rep_matrix_only()
-        layer.mlp.rep_matrix_only()
+        attn_block = layer.self_attn if hasattr(layer, 'self_attn') else layer.attention
+        attn_block.rep_matrix_only()
+        ff_block = layer.mlp if hasattr(layer, 'mlp') else layer.feed_forward
+        ff_block.rep_matrix_only()
         paras_name = ["trans.matrix", "trans.diag_scale", "clip_factor_w", "clip_factor_a"]
         flat_matrices[i] = get_paras_dict_by_name(layer, required_names=paras_name)
     if rank is not None:

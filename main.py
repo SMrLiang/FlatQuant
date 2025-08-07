@@ -9,13 +9,19 @@ import flatquant.train_utils as train_utils
 import flatquant.flat_utils as flat_utils
 import gptq_utils
 
+# import sys
+# BASE = "/home/liangyiheng/xten/models/internlm/internlm2_1_8b"
+# sys.path.insert(0, BASE)
+
+# from hf.modeling_internlm2 import 
+
 def main():
     args, logger = args_utils.parser_gen()
     utils.seed_everything(seed=args.seed)
 
     model, apply_flatquant_to_model = model_utils.get_model(args.model, args.hf_token)
     model.eval()
-    tokenizer = transformers.AutoTokenizer.from_pretrained(args.model, use_fast=False, use_auth_token=args.hf_token)
+    tokenizer = transformers.AutoTokenizer.from_pretrained(args.model, use_fast=False, use_auth_token=args.hf_token, trust_remote_code=True)
 
     # get calibration data
     trainloader = data_utils.get_loaders(
@@ -33,7 +39,10 @@ def main():
         elif args.reload_matrix:
             flat_utils.load_flat_matrices(args, model, path=args.matrix_path)
         elif (args.cali_trans or args.add_diag or args.lwc or args.lac):
-            train_utils.cali_flat_quant(args, model, trainloader, utils.DEV, logger=logger)
+            if 'internlm' in args.model:
+                train_utils.cali_flat_quant_internlm(args, model, trainloader, utils.DEV, logger=logger)
+            else:
+                train_utils.cali_flat_quant(args, model, trainloader, utils.DEV, logger=logger)
         if args.save_matrix and not args.reload_matrix:
             flat_utils.save_flat_matrices(args, model)
         flat_utils.reparameterize_model(model)
@@ -53,7 +62,8 @@ def main():
         model.to(utils.DEV)
     
     # Evaluating PPL
-    for eval_dataset in ["wikitext2", "c4"]:
+    for eval_dataset in ["wikitext2"]:
+    # for eval_dataset in ["wikitext2", "c4"]:
         logger.info(eval_dataset)
         testloader = data_utils.get_loaders(
                 args,
@@ -65,7 +75,7 @@ def main():
                 eval_mode=True
             )
         dataset_ppl = eval_utils.ppl_eval(model, testloader)
-        logger.info(dataset_ppl)
+        logger.info(f" ppl: {dataset_ppl}")
 
 
     if args.lm_eval:

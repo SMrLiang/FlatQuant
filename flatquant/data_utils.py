@@ -11,11 +11,11 @@ class TokenizerWrapper:
 
 def get_wikitext2(nsamples, seed, seqlen, tokenizer, eval_mode=False):
     if eval_mode:
-        testdata = datasets.load_dataset('./datasets/wikitext', 'wikitext-2-raw-v1', split='test')
+        testdata = datasets.load_dataset('/data/yihengliang/q_data/wikitext', data_files={'test': 'test-00000-of-00001.parquet'}, split='test')
         testenc = tokenizer("\n\n".join(testdata['text']), return_tensors='pt')
         return testenc
     else:
-        traindata = datasets.load_dataset('./datasets/wikitext', 'wikitext-2-raw-v1', split='train')
+        traindata = datasets.load_dataset('/data/yihengliang/q_data/wikitext', data_files={'train': 'train-00000-of-00001.parquet'}, split='train')
         traindata = traindata.filter(lambda x: len(x) > 0)
         traindata = traindata.map(lambda x : {'text': x['text'].strip()})
         trainenc = tokenizer("\n\n".join(traindata['text']), return_tensors='pt')    
@@ -34,14 +34,14 @@ def get_wikitext2(nsamples, seed, seqlen, tokenizer, eval_mode=False):
 def get_c4_new(nsamples, seed, seqlen, tokenizer, eval_mode=False):
     if eval_mode:
         valdata = datasets.load_dataset(
-        './datasets/allenai/c4', data_files={'validation': 'en/c4-validation.00000-of-00008.json.gz'}, split='validation')
+        '/data/yihengliang/q_data/allenai/c4', data_files={'validation': 'en/c4-validation.00000-of-00008.json.gz'}, split='validation')
         valenc = tokenizer(' '.join(valdata[:1100]['text']), return_tensors='pt')
         valenc = valenc.input_ids[:, :(256 * seqlen)]
         valenc = TokenizerWrapper(valenc)
         return valenc
     else:
         traindata = datasets.load_dataset(
-            './datasets/allenai/c4', data_files={'train': 'en/c4-train.00000-of-01024.json.gz'}, split='train')
+            '/data/yihengliang/q_data/allenai/c4', data_files={'train': 'en/c4-train.00000-of-01024.json.gz'}, split='train')
         # random.seed(seed)
         trainloader = []
         for _ in range(nsamples):
@@ -80,7 +80,7 @@ def get_ptb_new(nsamples, seed, seqlen, tokenizer, eval_mode=False):
 
 
 def get_pile(nsamples, seed, seqlen, tokenizer):
-    traindata = datasets.load_dataset("./datasets/pile-val-backup", split="validation")
+    traindata = datasets.load_dataset("/data/yihengliang/q_data/pile", data_files={'validation': 'val.jsonl.zst'}, split="validation")
     trainenc = tokenizer("\n\n".join(traindata['text'][:1000]), return_tensors='pt')
     # random.seed(seed)
     trainloader = []
@@ -107,9 +107,9 @@ def get_loaders(
             dataset = pickle.load(f)
     else:
         if hf_token is None:
-            tokenizer = transformers.AutoTokenizer.from_pretrained(model, use_fast=False)
+            tokenizer = transformers.AutoTokenizer.from_pretrained(model, use_fast=False, trust_remote_code=True)
         else:
-            tokenizer = transformers.AutoTokenizer.from_pretrained(model, use_fast=False, use_auth_token=hf_token)
+            tokenizer = transformers.AutoTokenizer.from_pretrained(model, use_fast=False, use_auth_token=hf_token, trust_remote_code=True)
         if 'wikitext2' in name:
             dataset = get_wikitext2(nsamples, seed, seqlen, tokenizer, eval_mode)
         elif 'ptb' in name:

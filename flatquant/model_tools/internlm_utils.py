@@ -18,6 +18,7 @@ from hf.modeling_internlm2 import InternLM2Attention, InternLM2MLP, repeat_kv, a
 
 class FlatQuantInternLM2MLP(InternLM2MLP):
     def __init__(self, args, module: InternLM2MLP):
+        super().__init__(module.config, module.layer_idx)
         self.args = args
         self.w1 = FlatQuantizedLinear(args, module.w1)
         self.w3 = FlatQuantizedLinear(args, module.w3)
@@ -46,7 +47,7 @@ class FlatQuantInternLM2MLP(InternLM2MLP):
             self.up_gate_trans, self.down_trans = None, None        
 
 
-    def _trans_forward(self, x):
+    def _trans_forward(self, x, **kwargs):
         if self.up_gate_trans is not None:
             x_ts = self.up_gate_trans(x)
         else:
@@ -64,7 +65,7 @@ class FlatQuantInternLM2MLP(InternLM2MLP):
 
 
 
-    def _ori_forward(self, x):
+    def _ori_forward(self, x, **kwargs):
         '''origin implement: w2 = self.w2(self.act_fn(self.w3(x)) * self.w1(x))'''
         if self.diag_init == "sq_style":
             self.up_smax = torch.maximum(self.up_smax, x.reshape(-1, x.shape[-1]).abs().max(0)[0].clone().detach())
@@ -75,11 +76,43 @@ class FlatQuantInternLM2MLP(InternLM2MLP):
         return down_states
 
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         if self._ori_mode:
-            return self._ori_forward(x)
-        return self._trans_forward(x)
+            return self._ori_forward(x, **kwargs)
+        return self._trans_forward(x, **kwargs)
 
+    def reparameterize(self, ):
+        if self.up_gate_trans is not None:
+            self.up_gate_trans.to_eval_mode()
+            self.down_trans.to_eval_mode()
+        self.w3.reparameterize(qa_trans=self.up_gate_trans)
+        self.w1.reparameterize(qa_trans=self.up_gate_trans)
+        self.w2.reparameterize(qa_trans=self.down_trans)
+        if self.up_gate_trans is not None:
+            self.up_gate_trans.use_diag = False
+        # merge trans's diag scale
+        if self.down_trans is not None and self.down_trans.add_diag:
+            up_weight = self.w1.linear.weight
+            ori_dtype = up_weight.dtype
+            up_weight = up_weight.to(torch.float64).T.mul(self.down_trans.diag_scale.to(torch.float64)).T
+            self.w1.linear.weight.data = up_weight.to(ori_dtype)
+            self.down_trans.use_diag = False
+
+    def init_diag_scale(self, alpha=0.5):
+        assert hasattr(self, "up_smax") and hasattr(self, "down_smax")
+        upw_smax = torch.cat([self.w1.linear.weight, self.w3.linear.weight], dim=0).abs().max(dim=0)[0]
+        downw_smax = self.w2.linear.weight.abs().max(dim=0)[0]
+        if self.up_gate_trans is not None:
+            self.up_gate_trans.diag_scale.data = get_init_scale(upw_smax, self.up_smax, alpha)
+        if self.down_trans is not None:
+            self.down_trans.diag_scale.data = get_init_scale(downw_smax, self.down_smax, alpha)
+        del self.up_smax, self.down_smax
+        self.diag_init = None
+
+    def rep_matrix_only(self, ):
+        if self.up_gate_trans is not None:
+            self.up_gate_trans.to_eval_mode()
+            self.down_trans.to_eval_mode()
 
 
 class FlatQuantInternLM2Attention(InternLM2Attention):
@@ -90,10 +123,11 @@ class FlatQuantInternLM2Attention(InternLM2Attention):
         # self.q_proj = FlatQuantizedLinear(args, module.q_proj)
         # self.k_proj = FlatQuantizedLinear(args, module.k_proj)
         # self.v_proj = FlatQuantizedLinear(args, module.v_proj)
+        # ((self.num_heads + 2 * self.num_key_value_heads) * self.head_dim, in) 
         self.wqkv = FlatQuantizedLinear(args, module.wqkv)
 
         self.wo = FlatQuantizedLinear(args, module.wo)
-        self.add_fq_trans()
+        
         
         # get num_key_value_groups
         self.hidden_size = self.config.hidden_size
@@ -103,7 +137,7 @@ class FlatQuantInternLM2Attention(InternLM2Attention):
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads
 
 
-        assert args.q_bits == args.k_bits == args.v_bits
+        assert args.k_bits == args.v_bits
 
         if args.q_bits < 16:
             self.q_cache_quantizer = ActivationQuantizer(bits=args.q_bits, \
@@ -118,8 +152,13 @@ class FlatQuantInternLM2Attention(InternLM2Attention):
         self._ori_mode = False
         self._eval_mode = False
         self.diag_init = args.diag_init
+        import copy
+        self.qkv_weight = copy.deepcopy(self.wqkv.linear.weight).reshape(self.num_key_value_heads, self.num_key_value_groups+2, self.head_dim, self.hidden_size)
+        self.q_proj_weight = self.qkv_weight[:, :self.num_key_value_groups, :, :].reshape(self.num_key_value_heads*self.num_key_value_groups*self.head_dim, self.hidden_size)
+        
+        self.add_fq_trans()
         if self.diag_init == "sq_style":
-            self.ln_smax = torch.ones_like(self.q_proj.linear.weight.abs().max(dim=0)[0]).cuda() * 1e-5
+            self.ln_smax = torch.ones_like(self.q_proj_weight.abs().max(dim=0)[0]).cuda() * 1e-5
 
     def add_fq_trans(self):
         if self.args.direct_inv:
@@ -127,7 +166,7 @@ class FlatQuantInternLM2Attention(InternLM2Attention):
         else:
             SingleTransMatrix, DecomposeTransMatrix = SVDSingleTransMatrix, SVDDecomposeTransMatrix
         if self.args.w_bits < 16 or self.args.a_bits < 16:
-            ln_dim_left, ln_dim_right = get_decompose_dim(self.q_proj.linear.weight.shape[1])
+            ln_dim_left, ln_dim_right = get_decompose_dim(self.q_proj_weight.shape[1])
             self.ln_trans = DecomposeTransMatrix(ln_dim_left, ln_dim_right, add_diag=self.args.add_diag)
             self.o_trans = SingleTransMatrix(self.config.num_attention_heads)
         else:
@@ -188,7 +227,7 @@ class FlatQuantInternLM2Attention(InternLM2Attention):
         return q, k
 
     def forward(self, hidden_states, attention_mask, position_ids,
-                    past_key_value, output_attentions, use_cache, **kwargs):
+                    past_key_value, output_attentions, use_cache, cache_position, **kwargs):
         # all forward based on pretraining_tp=1
         assert self.config.pretraining_tp == 1
 
@@ -209,8 +248,13 @@ class FlatQuantInternLM2Attention(InternLM2Attention):
         query_states = rearrange(query_states, "b q h gs d -> b q (h gs) d")
         key_states = qkv_states[..., -2, :]
         value_states = qkv_states[..., -1, :]
-        
-        assert query_states[-1] == key_states[-1] == self.num_key_value_heads == value_states[-1]
+        # print("q_size: ", query_states.size())
+        # print("k_size: ", key_states.size())
+        # print("v_size: ", value_states.size())
+        # print("num_key_value_heads: ", self.num_key_value_heads)
+
+        # 注释掉这一行,internlm2到此步形状不是这样
+        # assert query_states[-1] == key_states[-1] == self.num_key_value_heads == value_states[-1]
 
         query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
         key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
@@ -225,8 +269,8 @@ class FlatQuantInternLM2Attention(InternLM2Attention):
                     "with a layer index."
                 )
             kv_seq_len += past_key_value.get_usable_length(kv_seq_len, self.layer_idx)
-        cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
-        query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
+        cos, sin = self.rotary_emb(value_states, position_ids)
+        query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)           
         # ---- here do the quantization ----
         # hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhere to continue
         if not self._ori_mode:
@@ -234,7 +278,7 @@ class FlatQuantInternLM2Attention(InternLM2Attention):
             value_states = self.quant_vcache(value_states)
 
         if past_key_value is not None:
-            cache_kwargs = {"sin": sin, "cos": cos}  # Specific to RoPE models
+            cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}  # Specific to RoPE models
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
 
         key_states = repeat_kv(key_states, self.num_key_value_groups)
@@ -258,7 +302,6 @@ class FlatQuantInternLM2Attention(InternLM2Attention):
 
         # upcast attention to fp32
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
-        attn_weights = nn.functional.dropout(attn_weights, p=self.attention_dropout, training=self.training)
         attn_output = torch.matmul(attn_weights, value_states)
 
         if attn_output.size() != (bsz, self.num_heads, q_len, self.head_dim):
@@ -346,12 +389,12 @@ class FlatQuantInternLM2Attention(InternLM2Attention):
             self.o_trans.to_eval_mode()
 
 
-def apply_flatquant_to_llama(args, model):
+def apply_flatquant_to_internlm(args, model):
     skip_initialization()
     # Replace module with FlatQuant version
     for layer in range(model.config.num_hidden_layers):
         # attn
-        model.model.layers[layer].self_attn = FlatQuantInternLM2Attention(args, model.model.layers[layer].self_attn)
+        model.model.layers[layer].attention = FlatQuantInternLM2Attention(args, model.model.layers[layer].attention)
         # mlp
-        model.model.layers[layer].mlp = FlatQuantInternLM2MLP(args, model.model.layers[layer].mlp)
+        model.model.layers[layer].feed_forward = FlatQuantInternLM2MLP(args, model.model.layers[layer].feed_forward)
     return model

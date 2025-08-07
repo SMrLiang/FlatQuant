@@ -159,8 +159,10 @@ def gptq_fwrd(model, dataloader, dev, args):
     use_cache = model.config.use_cache
     model.config.use_cache = False
     layers = model.model.layers
-
-    model.model.embed_tokens = model.model.embed_tokens.to(dev)
+    if 'internlm' in args.model:
+        model.model.tok_embeddings = model.model.tok_embeddings.to(dev)
+    else:
+        model.model.embed_tokens = model.model.embed_tokens.to(dev)
     model.model.norm = model.model.norm.to(dev)
     if hasattr(model.model, "rotary_emb"):
         model.model.rotary_emb = model.model.rotary_emb.to(dev)
@@ -191,7 +193,11 @@ def gptq_fwrd(model, dataloader, dev, args):
     layers[0] = layers[0].module
 
     layers[0] = layers[0].cpu()
-    model.model.embed_tokens = model.model.embed_tokens.cpu()
+    
+    if 'internlm' in args.model:
+        model.model.tok_embeddings = model.model.tok_embeddings.cpu()
+    else:
+        model.model.embed_tokens = model.model.embed_tokens.cpu()
     model.model.norm = model.model.norm.cpu()
     torch.cuda.empty_cache()
 
@@ -200,12 +206,19 @@ def gptq_fwrd(model, dataloader, dev, args):
     position_ids = cache['position_ids']
 
     quantizers = {}
-    sequential = [
-                ['self_attn.k_proj.linear', 'self_attn.v_proj.linear', 'self_attn.q_proj.linear'],
-                ['self_attn.o_proj.linear'],
-                ['mlp.up_proj.linear', 'mlp.gate_proj.linear'],
-                ['mlp.down_proj.linear']
-            ]
+    if 'internlm' in args.model:
+        sequential = [['attention.wqkv.linear'],
+                      ['attention.wo.linear'],
+                      ['feed_forward.w1.linear', 'feed_forward.w3.linear'], 
+                      ['feed_forward.w2.linear']
+        ]
+    else:
+        sequential = [
+                    ['self_attn.k_proj.linear', 'self_attn.v_proj.linear', 'self_attn.q_proj.linear'],
+                    ['self_attn.o_proj.linear'],
+                    ['mlp.up_proj.linear', 'mlp.gate_proj.linear'],
+                    ['mlp.down_proj.linear']
+                ]
     # sequential = [
     #             ['self_attn.k_proj', 'self_attn.v_proj', 'self_attn.q_proj'],
     #             ['self_attn.o_proj'],

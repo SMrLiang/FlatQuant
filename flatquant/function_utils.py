@@ -23,7 +23,10 @@ def get_decompose_dim(n):
 
 def get_random_orthg(size):
     H = np.random.randn(size, size)
+    # qr分解，Q是一个正交矩阵
     Q, R = qr(H)
+    # 对每列向量按R的符号* +1/-1，因为Q的符号不确定
+    # 标准正交；配合种子可复现
     Q_modified = Q @ np.diag(np.sign(np.diag(R)))
     return torch.from_numpy(Q_modified)
 
