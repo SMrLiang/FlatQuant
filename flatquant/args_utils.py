@@ -29,7 +29,8 @@ supported_models = [
             'meta-llama/Llama-3.1-8B-Instruct', 
             'Qwen/Qwen2.5-32B-Instruct', 
             'Qwen/Qwen2.5-7B-Instruct', 
-            '/home/liangyiheng/xten/models/internlm/internlm2_1_8b/hf'
+            '/home/liangyiheng/xten/models/internlm/internlm2_1_8b/hf',
+            '/home/liangyiheng/xten/models/qwen/qwen2-7b/hf'
             ]
 supported_datasets = ['wikitext2', 'c4', 'pile']
 

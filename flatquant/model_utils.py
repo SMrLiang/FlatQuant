@@ -62,6 +62,7 @@ def get_qwen2(model_name, hf_token):
     return model, apply_flatquant_to_qwen
 
 def get_internlm2(model_name, hf_token):
+    skip_initialization()
     import sys
     BASE = "/home/liangyiheng/xten/models/internlm/internlm2_1_8b"
     sys.path.insert(0, BASE)
@@ -86,7 +87,20 @@ def get_opt(model_name):
     logging.info(f'---> Loading {model_name} Model with seq_len: {model.seqlen}')
     raise NotImplementedError("Post-processing for OPT model is not implemented yet.")
 
-
+def get_qwen2_speci(model_name, hf_token):
+    skip_initialization()
+    import sys
+    BASE = "/home/liangyiheng/xten/models/qwen/qwen2-7b/hf"
+    sys.path.insert(0, BASE)
+    from hf.modeling_qwen2 import Qwen2ForCausalLM    
+    model = Qwen2ForCausalLM.from_pretrained(model_name,
+                                                          torch_dtype='auto',
+                                                          use_auth_token=hf_token,
+                                                          low_cpu_mem_usage=True)
+    model.seqlen = 2048
+    logging.info(f'---> Loading {model_name} Model with seq_len: {model.seqlen}')
+    from flatquant.model_tools.qwen_utils import apply_flatquant_to_qwen
+    return model, apply_flatquant_to_qwen
 
 
 # Unified model loading function
@@ -95,10 +109,12 @@ def get_model(model_name, hf_token=None):
         return get_llama_31(model_name, hf_token)
     elif 'llama' in model_name:
         return get_llama(model_name, hf_token)
-    elif 'qwen-2.5' in model_name:
+    elif 'qwen-2.5' in model_name or 'qwen2' in model_name:
         return get_qwen2(model_name, hf_token)
     elif 'internlm2' in model_name:
         return get_internlm2(model_name, hf_token)
+    # elif 'qwen2' in model_name:
+    #     return get_qwen2_speci(model_name, hf_token)
     else:
         raise ValueError(f'Unknown model {model_name}')
 

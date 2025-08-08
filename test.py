@@ -1,46 +1,70 @@
 import torch
 import torch.nn.functional as F
-import numpy as np
 
-# 设置随机种子
 torch.manual_seed(0)
 
-# 1. 创建一组高斯分布的模拟“权重”
-dim = 128
-W = torch.randn(dim)
-W[0] += 10
-# 2. 构造一个随机正交（旋转）矩阵
-def random_rotation_matrix(dim):
-    Q, _ = torch.qr(torch.randn(dim, dim))  # QR分解得到正交矩阵
-    return Q
+# --- helpers ---
+def random_rotation(n):
+    # Orthogonal via QR
+    q, _ = torch.linalg.qr(torch.randn(n, n))
+    # Ensure a proper rotation (det=+1); optional
+    if torch.det(q) < 0:
+        q[:, 0] = -q[:, 0]
+    return q
 
-R = random_rotation_matrix(dim)
-
-print(f"ori weight:{W}, max:{torch.max(W)}, min:{torch.min(W)}, mean{torch.mean(W)}")
-# 3. 应用旋转
-W_rot = R @ W
-print(f"rotated weight:{W_rot}, max:{torch.max(W_rot)}, min:{torch.min(W_rot)}, mean{torch.mean(W_rot)}")
-
-# 4. 量化函数（对称8bit线性量化）
-def quantize_symmetric(x, num_bits=8):
-    qmin = -2**(num_bits-1)
-    qmax = 2**(num_bits-1) - 1
-    scale = x.abs().max() / qmax
+def quantize_symmetric(x, num_bits=8, axis=None):
+    """
+    Symmetric linear quant. If axis is not None, compute per-channel scales
+    along that axis (kept for broadcasting).
+    """
+    qmin = -(2**(num_bits-1))
+    qmax = (2**(num_bits-1)) - 1
+    if axis is None:
+        amax = x.abs().amax()
+        scale = (amax / qmax) if amax > 0 else x.new_tensor(1.0)
+    else:
+        amax = x.abs().amax(dim=axis, keepdim=True)
+        scale = torch.where(amax > 0, amax / qmax, torch.ones_like(amax))
     x_q = torch.clamp((x / scale).round(), qmin, qmax)
-    x_deq = x_q * scale
-    return x_deq, scale
+    return x_q * scale, scale
 
-# 5. 分别对原始和旋转权重量化
-W_q, scale1 = quantize_symmetric(W)
-W_rot_q, scale2 = quantize_symmetric(W_rot)
+# --- setup a linear layer and a batch of activations ---
+B = 64          # batch
+In = 128        # input dim
+Out = 128       # output dim
 
-# 6. 反旋转回原始空间
-# W_rot_q_inv = R.T @ W_rot_q
+W = torch.randn(Out, In)
+X = torch.randn(B, In)
 
-# 7. 计算 MSE
-mse_original = F.mse_loss(W_q, W)
-mse_rotated = F.mse_loss(W_rot_q, W)
+# sprinkle some outliers to make rotation matter
+W[0, 0] += 10.0
+X[0, 0] += 12.0
 
-# 8. 打印结果
-print(f"Original Quantization MSE: {mse_original.item():.6f}")
-print(f"Rotated Quantization MSE:  {mse_rotated.item():.6f}")
+# Baseline float output
+Y_fp = X @ W.T
+
+# --- quantize without rotation ---
+# per-tensor (set axis=None). For per-channel weight quant, use axis=1 (row-wise)
+W_q, _ = quantize_symmetric(W, num_bits=8, axis=None)
+X_q, _ = quantize_symmetric(X, num_bits=8, axis=None)
+Y_wa_q = X_q @ W_q.T
+mse_wa = F.mse_loss(Y_wa_q, Y_fp).item()
+
+# --- apply rotations and quantize both weight & activation in rotated bases ---
+U = random_rotation(Out)     # output rotation
+V = random_rotation(In)      # input rotation
+
+W_rot = U @ W @ V.T
+X_rot = X @ V.T
+
+# Quantize in rotated space (try per-channel weights along rows: axis=1)
+W_rot_q, _ = quantize_symmetric(W_rot, num_bits=8, axis=1)
+X_rot_q, _ = quantize_symmetric(X_rot, num_bits=8, axis=None)
+
+# Compute output in rotated space then bring it back to original basis
+Y_rot_q = X_rot_q @ W_rot_q.T           # this equals (approximately) Y_fp @ U.T
+Y_rec = Y_rot_q @ U.T                   # back to original basis
+mse_rot_wa = F.mse_loss(Y_rec, Y_fp).item()
+
+print(f"MSE (quantize W & X, no rotation): {mse_wa:.6f}")
+print(f"MSE (quantize W & X, with rotation): {mse_rot_wa:.6f}")

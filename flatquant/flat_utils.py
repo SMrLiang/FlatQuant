@@ -65,6 +65,7 @@ def load_flat_parameters(args, model, path=None):
         flat_parameters = torch.load(os.path.join(path, f"flat_parameters.pth"))
     layers = model.model.layers
     
+    # pth 可以这么操作
     for i in range(len(flat_parameters.keys())):
         flat_param = flat_parameters[i]
         layers[i].load_state_dict(flat_param, strict=False)
@@ -98,6 +99,7 @@ def load_flat_matrices(args, model, path=None):
     
     for i in range(len(flat_parameters.keys())):
         flat_param = flat_parameters[i]
+        # 主要将trans矩阵grad设为None
         layers[i].self_attn.rep_matrix_only()
         layers[i].mlp.rep_matrix_only()
         layers[i].load_state_dict(flat_param, strict=False)

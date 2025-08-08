@@ -20,13 +20,13 @@ def cali_flat_quant(args, model, dataloader, dev, logger):
     for name, param in model.named_parameters():
         param.requires_grad = False
 
-    # activate AMP
+    # 默认activate AMP
     if args.deactive_amp:
         dtype = torch.float32
         traincast = nullcontext
     else:
         dtype = torch.float16 if isinstance(model, transformers.LlamaForCausalLM) else torch.bfloat16
-        traincast = functools.partial(torch.amp.autocast, device_type="cuda", dtype=dtype)
+        traincast = functools.partial(torch.amp.autocast, device_type="cuda", dtype=dtype) 
 
     # move embedding layer and first layer to target device
     layers = model.model.layers
@@ -51,6 +51,12 @@ def cali_flat_quant(args, model, dataloader, dev, logger):
             cache["attention_mask"] = kwargs["attention_mask"]
             cache["position_ids"] = kwargs["position_ids"]
             raise ValueError
+        def __getattr__(self, name):
+            try:
+                return super().__getattr__(name)
+            except AttributeError:
+                return getattr(self.module, name)
+        
     layers[0] = Catcher(layers[0])
     with torch.no_grad():
         for batch in dataloader:
@@ -78,6 +84,7 @@ def cali_flat_quant(args, model, dataloader, dev, logger):
     torch.cuda.empty_cache()
 
     # same input of first layer for fp model and quant model
+    # nsample, seq_len, hidden_size, 这里不考虑就是一个batch对应一个sample
     fp_inps = inps   # take output of fp model as input
     fp_outs = torch.zeros_like(inps)   # take output of fp model as input
 
@@ -141,6 +148,7 @@ def cali_flat_quant(args, model, dataloader, dev, logger):
             with traincast():
                 for j in range(args.nsamples // args.cali_bsz):
                     index = j * args.cali_bsz
+                    # 
                     quant_out = layer(fp_inps[index:index+args.cali_bsz,], attention_mask=attention_mask_batch, position_ids=position_ids)[0]
                     loss = loss_func(fp_outs[index:index+args.cali_bsz,], quant_out)
                     mse += loss.detach().cpu()
@@ -222,6 +230,7 @@ def cali_flat_quant_internlm(args, model, dataloader, dev, logger):
                 sample = batch[0]
                 model(sample.to(dev))
             except ValueError:
+                # 每一个batch都过，所以结果是只捕获第一层的输入
                 pass
     position_ids = cache["position_ids"]
     attention_mask = cache["attention_mask"]
@@ -261,15 +270,15 @@ def cali_flat_quant_internlm(args, model, dataloader, dev, logger):
         with torch.no_grad():
             layer.float()
 
-        layer.attention._ori_mode = True
+        # layer.attention._ori_mode = True
         layer.feed_forward._ori_mode = True
         with torch.no_grad():
             for j in range(args.nsamples):
                 fp_outs[j] = layer(fp_inps[j].unsqueeze(0), attention_mask=attention_mask, position_ids=position_ids)[0]
-        layer.attention._ori_mode = False
+        # layer.attention._ori_mode = False
         layer.feed_forward._ori_mode = False
         if args.diag_init == "sq_style":
-            layer.attention.init_diag_scale(alpha=args.diag_alpha)
+            # layer.attention.init_diag_scale(alpha=args.diag_alpha)
             layer.feed_forward.init_diag_scale(alpha=args.diag_alpha)
         elif args.diag_init == "one_style":
             pass
@@ -306,7 +315,6 @@ def cali_flat_quant_internlm(args, model, dataloader, dev, logger):
             start_tick = time.time()
             with traincast():
                 for j in range(args.nsamples // args.cali_bsz):
-                    print(args.nsamples // args.cali_bsz)
                     index = j * args.cali_bsz
                     quant_out = layer(fp_inps[index:index+args.cali_bsz,], attention_mask=attention_mask_batch, position_ids=position_ids, export_hidden_layers_prefill=export_hidden_layers_prefill, export_hidden_layers_decode=export_hidden_layers_decode)[0]
                     loss = loss_func(fp_outs[index:index+args.cali_bsz,], quant_out)

@@ -394,7 +394,7 @@ def apply_flatquant_to_internlm(args, model):
     # Replace module with FlatQuant version
     for layer in range(model.config.num_hidden_layers):
         # attn
-        model.model.layers[layer].attention = FlatQuantInternLM2Attention(args, model.model.layers[layer].attention)
+        # model.model.layers[layer].attention = FlatQuantInternLM2Attention(args, model.model.layers[layer].attention)
         # mlp
         model.model.layers[layer].feed_forward = FlatQuantInternLM2MLP(args, model.model.layers[layer].feed_forward)
     return model

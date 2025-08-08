@@ -9,6 +9,7 @@ def get_init_scale(w_smax, x_smax, alpha=0.5):
 
 
 def get_decompose_dim(n):
+    # n = (a-b)*(a+b)
     a = int(math.sqrt(n))
     if a * a < n:
         a += 1

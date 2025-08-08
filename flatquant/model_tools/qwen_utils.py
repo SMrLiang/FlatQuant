@@ -115,7 +115,9 @@ class FlatQuantQwen2Attention(Qwen2Attention):
     def __init__(self, args, module: Qwen2Attention):
         super().__init__(module.config, module.layer_idx)
         self.args = args
+        self.head_dim = module.head_dim
         
+
         self.q_proj = FlatQuantizedLinear(args, module.q_proj)
         self.k_proj = FlatQuantizedLinear(args, module.k_proj)
         self.v_proj = FlatQuantizedLinear(args, module.v_proj)

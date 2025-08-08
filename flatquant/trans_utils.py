@@ -171,6 +171,7 @@ class InvDecomposeTransMatrix(nn.Module):
     def __init__(self, left_size, right_size, add_diag=False, diag_init_para=None):
         super(InvDecomposeTransMatrix, self).__init__()
         linear_left = nn.Linear(left_size, left_size, bias=False)
+        # 随机正交矩阵做初始化
         linear_left.weight.data = get_init_weight(left_size).to(linear_left.weight)
         self.linear_left = linear_left
 
@@ -204,6 +205,7 @@ class InvDecomposeTransMatrix(nn.Module):
         return kronecker_matmul(inp, matrix_left.to(inp), matrix_right.to(inp))
 
     def to_eval_mode(self):
+        # 权重取出
         if not self._eval_mode:
             self.matrix_left = nn.Parameter(self.linear_left.weight, requires_grad=False)
             self.matrix_right = nn.Parameter(self.linear_right.weight, requires_grad=False)
