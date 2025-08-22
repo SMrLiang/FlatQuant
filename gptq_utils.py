@@ -306,7 +306,7 @@ def rtn_fwrd(model, dev, args):
                 layer_weight_bits = 16
                 continue
 
-            quantizer = WeightQuantizer()
+            quantizer = WeightQuantizer(format=args.format)
             quantizer.configure(
                 layer_weight_bits, perchannel=True, sym=not(args.w_asym), mse=args.gptq_mse
             )

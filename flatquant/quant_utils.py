@@ -1,4 +1,34 @@
 import torch
+import xten
+
+class FP8FakeQuantSTE(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x):
+        return x.to(torch.float8_e4m3fn).to(x.dtype)
+            # return x
+    @staticmethod
+    def backward(ctx, grad_out):
+        # STE: pass-through, optionally zero grad outside representable range
+        grad_in = grad_out
+        return grad_in
+
+
+class NVFP4FakeQuantSTE(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x):
+            # x_fp16 = x.to(dtype=torch.float16)
+            # y = xten.from_torch(torch.zeros_like(x_fp16))
+            # xten.quant.nvfp4_pseudo_quant(xten.from_torch(x_fp16), y)
+            ctx.save_for_backward(x)
+            # return xten.to_torch(y).to(x.dtype)
+            return x
+    @staticmethod
+    def backward(ctx, grad_out):
+        # STE: pass-through, optionally zero grad outside representable range
+        (inside,) = ctx.saved_tensors
+        grad_in = grad_out * inside
+        return grad_in
+
 
 def round_ste(x: torch.Tensor):
     """
@@ -50,7 +80,7 @@ class ActivationQuantizer(torch.nn.Module):
         A class for quantizing the activations. We only support (both sym. and asym.) per-token quantization
         for the activations.
     '''
-    def __init__(self, bits, sym=False, lac=False, groupsize=-1, clip_ratio=None, ):
+    def __init__(self, bits, sym=False, lac=False, groupsize=-1, clip_ratio=None, format="int"):
         super(ActivationQuantizer, self).__init__()
         self.bits = bits
         self.q_max, self.q_min = get_qmin_qmax(bits, sym)
@@ -60,6 +90,7 @@ class ActivationQuantizer(torch.nn.Module):
             raise NotImplementedError("Not support per-group quantization for activation yet.")
         self.lac = lac
         self._clip_ratio = clip_ratio
+        self.format = format
         if self.lac:
             init_value = 4.
             self.sigmoid = torch.nn.Sigmoid()
@@ -76,11 +107,19 @@ class ActivationQuantizer(torch.nn.Module):
 
     def fake_quant(self, x):
         x_dtype = x.dtype
-        scale, zero = self.get_scale_zero(x)
-        if self.sym:
-            return sym_quant_dequant(x, scale, self.q_max.to(x)).to(x_dtype)
-        else:
-            return asym_quant_dequant(x, scale, zero, self.q_max.to(x)).to(x_dtype)  # TODO
+        if self.format=="int":
+            scale, zero = self.get_scale_zero(x)
+            if self.sym:
+                return sym_quant_dequant(x, scale, self.q_max.to(x)).to(x_dtype)
+            else:
+                return asym_quant_dequant(x, scale, zero, self.q_max.to(x)).to(x_dtype)  # TODO
+        elif self.format=="nvfp4":
+            # return NVFP4FakeQuantSTE.apply(x)
+            return x 
+        elif self.format=="fp8":
+            return FP8FakeQuantSTE.apply(x)
+
+
 
     def get_scale_zero(self, x):
         q_max = self.q_max.to(x)
@@ -122,12 +161,12 @@ class ActivationQuantizer(torch.nn.Module):
 class WeightQuantizer(torch.nn.Module):
     '''From GPTQ Repo'''
 
-    def __init__(self, shape=1):
+    def __init__(self, shape=1, format="int"):
         super(WeightQuantizer, self).__init__()
         self.register_buffer('maxq', torch.tensor(0))
         self.register_buffer('scale', torch.zeros(shape))
         self.register_buffer('zero', torch.zeros(shape))
-
+        self.format = format
         self.enable = True
 
     def configure(
@@ -220,7 +259,15 @@ class WeightQuantizer(torch.nn.Module):
         return x
     
     def forward(self, x):
-        return self.quantize(x)
+        if self.format=="int":
+            return self.quantize(x)
+        elif self.format=="nvfp4":
+            # return NVFP4FakeQuantSTE.apply(x)
+            
+            return x
+        elif self.format=="fp8":
+            return FP8FakeQuantSTE.apply(x)
+            
 
     def enabled(self):
         return self.maxq > 0

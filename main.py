@@ -8,12 +8,26 @@ import flatquant.eval_utils as eval_utils
 import flatquant.train_utils as train_utils
 import flatquant.flat_utils as flat_utils
 import gptq_utils
-
+import time
+import torch
+import copy
 # import sys
 # BASE = "/home/liangyiheng/xten/models/internlm/internlm2_1_8b"
 # sys.path.insert(0, BASE)
 
 # from hf.modeling_internlm2 import 
+def _now():
+    # 高精度计时
+    return time.perf_counter()
+
+def _cuda_sync():
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+    except Exception:
+        pass
+
 
 def main():
     args, logger = args_utils.parser_gen()
@@ -21,6 +35,9 @@ def main():
 
     model, apply_flatquant_to_model = model_utils.get_model(args.model, args.hf_token)
     model.eval()
+    if args.eval_mse:
+        ori_model = copy.deepcopy(model)
+        ori_model.cpu()
     tokenizer = transformers.AutoTokenizer.from_pretrained(args.model, use_fast=False, use_auth_token=args.hf_token, trust_remote_code=True)
 
     # get calibration data
@@ -30,12 +47,13 @@ def main():
         seqlen=model.seqlen, eval_mode=False
     )
     logger.info("Finished loading training data.")
-
+    _cuda_sync()
+    start_time = _now()
     if args.quantize:
         model = apply_flatquant_to_model(args, model)
         logger.info("Finished applying FlatQuant to model.")
         if args.resume:
-            flat_utils.load_flat_parameters(args, model)
+            flat_utils.load_flat_parameters(args, model, path="/home/liangyiheng/FlatQuant/outputs/hf/w4a4/exp/qwen_flat_parameters.pth")
         elif args.reload_matrix:
             flat_utils.load_flat_matrices(args, model, path=args.matrix_path)
         elif (args.cali_trans or args.add_diag or args.lwc or args.lac):
@@ -55,6 +73,8 @@ def main():
         else: # RTN Weight Quantization
             quantizers = gptq_utils.rtn_fwrd(model, utils.DEV, args)
         save_dict["w_quantizers"] = quantizers
+    _cuda_sync()
+    print(f"quantization elapsed time: {(_now()-start_time)}s")
 
     if args.distribute_model:
         utils.distribute_model(model)
@@ -99,6 +119,17 @@ def main():
         metric_vals['acc_avg'] = round(sum(metric_vals.values()) / len(metric_vals.values()), 2)
         logger.info(metric_vals)
 
+    if args.eval_mse:
+        if 'internlm' in args.model:
+            prefill_acc, decode_acc, hidden_mse, k_mse, v_mse  = eval_utils.mse_eval_internlm(ori_model, model, testloader, tokenizer)
+            print(f"prefill acc: {prefill_acc}, decode acc: {decode_acc}, hidden mse: {hidden_mse}, k_mse: {k_mse}, v_mse: {v_mse}")
+            k_mse, v_mse = eval_utils.mse_eval_qk_internlm(model, testloader)
+            print(f"direct comparison: k_mse {k_mse}, v_mse {v_mse}")
+        elif 'qwen' in args.model:
+            prefill_acc, decode_acc, hidden_mse, k_mse, v_mse  = eval_utils.mse_eval_qwen(ori_model, model, testloader, tokenizer)
+            print(f"prefill acc: {prefill_acc}, decode acc: {decode_acc}, hidden mse: {hidden_mse}, k_mse: {k_mse}, v_mse: {v_mse}")
+            # k_mse, v_mse = eval_utils.mse_eval_qk_qwen(model, testloader)
+            # print(f"direct comparison: k_mse {k_mse}, v_mse {v_mse}")
 
 if __name__ == '__main__':
     main()

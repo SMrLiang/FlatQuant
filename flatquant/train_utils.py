@@ -270,15 +270,15 @@ def cali_flat_quant_internlm(args, model, dataloader, dev, logger):
         with torch.no_grad():
             layer.float()
 
-        # layer.attention._ori_mode = True
+        layer.attention._ori_mode = True
         layer.feed_forward._ori_mode = True
         with torch.no_grad():
             for j in range(args.nsamples):
                 fp_outs[j] = layer(fp_inps[j].unsqueeze(0), attention_mask=attention_mask, position_ids=position_ids)[0]
-        # layer.attention._ori_mode = False
+        layer.attention._ori_mode = False
         layer.feed_forward._ori_mode = False
         if args.diag_init == "sq_style":
-            # layer.attention.init_diag_scale(alpha=args.diag_alpha)
+            layer.attention.init_diag_scale(alpha=args.diag_alpha)
             layer.feed_forward.init_diag_scale(alpha=args.diag_alpha)
         elif args.diag_init == "one_style":
             pass

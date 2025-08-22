@@ -33,7 +33,7 @@ supported_models = [
             '/home/liangyiheng/xten/models/qwen/qwen2-7b/hf'
             ]
 supported_datasets = ['wikitext2', 'c4', 'pile']
-
+supported_formats = ['int', 'nvfp4', 'fp8']
 
 def parser_gen():
     parser = argparse.ArgumentParser()
@@ -145,6 +145,14 @@ def parser_gen():
         "--distribute_model",
         action="store_true",
         help="Distribute the model across multiple GPUs for evaluation.")
+    
+    parser.add_argument(
+        "--eval_mse", 
+        action="store_true",
+        help="Calculate the token mse and acc between quantized model and origin model."
+    )
+    parser.add_argument('--format', type=str, default='int',
+                        help='format.', choices=supported_formats)    
 
     args = parser.parse_args()
     if args.a_groupsize > -1:

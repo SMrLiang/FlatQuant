@@ -11,9 +11,9 @@ class FlatQuantizedLinear(nn.Module):
         self.args = args
         self.linear = linear
 
-        self.weight_quantizer = WeightQuantizer()
+        self.weight_quantizer = WeightQuantizer(format=args.format)
         self.weight_quantizer.configure(args.w_bits, perchannel=True, sym=not(args.w_asym), mse=False)
-        self.act_quantizer = ActivationQuantizer(bits=args.a_bits, sym=not(args.a_asym), lac=args.lac, groupsize=args.a_groupsize, )
+        self.act_quantizer = ActivationQuantizer(bits=args.a_bits, sym=not(args.a_asym), lac=args.lac, groupsize=args.a_groupsize, format=args.format)
 
         self.lwc = args.lwc
         if self.lwc:

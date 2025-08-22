@@ -62,7 +62,8 @@ def load_flat_parameters(args, model, path=None):
     if path is None:
         flat_parameters = torch.load(os.path.join(args.exp_dir, f"flat_parameters.pth"))
     else:
-        flat_parameters = torch.load(os.path.join(path, f"flat_parameters.pth"))
+        # flat_parameters = torch.load(os.path.join(path, f"flat_parameters.pth"))
+        flat_parameters = torch.load(path)
     layers = model.model.layers
     
     # pth 可以这么操作
@@ -94,7 +95,8 @@ def load_flat_matrices(args, model, path=None):
     if path is None:
         flat_parameters = torch.load(os.path.join(args.exp_dir, f"flat_matrices.pth"))
     else:
-        flat_parameters = torch.load(os.path.join(path, f"flat_matrices.pth"))
+        # flat_parameters = torch.load(os.path.join(path, f"flat_matrices.pth"))
+        flat_parameters = torch.load(path)
     layers = model.model.layers
     
     for i in range(len(flat_parameters.keys())):

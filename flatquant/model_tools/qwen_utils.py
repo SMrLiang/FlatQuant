@@ -117,7 +117,16 @@ class FlatQuantQwen2Attention(Qwen2Attention):
         self.args = args
         self.head_dim = module.head_dim
         
-
+        self.k_mse = 0.0
+        self.v_mse = 0.0
+        self.mse_cnt = 0
+        self.config = module.config 
+        self.num_heads = self.config.num_attention_heads
+        self.num_key_value_heads = self.config.num_key_value_heads 
+        self.hidden_size = self.config.hidden_size
+        self.head_dim = self.hidden_size // self.num_heads
+        self.num_key_value_heads = self.config.num_key_value_heads        
+        self.num_key_value_groups = self.num_heads // self.num_key_value_heads        
         self.q_proj = FlatQuantizedLinear(args, module.q_proj)
         self.k_proj = FlatQuantizedLinear(args, module.k_proj)
         self.v_proj = FlatQuantizedLinear(args, module.v_proj)
@@ -228,9 +237,15 @@ class FlatQuantQwen2Attention(Qwen2Attention):
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
         # ---- here do the quantization ----
         if not self._ori_mode:
+            ori_key_states = key_states.clone()
+            ori_value_states = value_states.clone()
             query_states, key_states = self.quant_kcache(query_states, key_states)
             value_states = self.quant_vcache(value_states)
 
+            self.k_mse += torch.nn.functional.mse_loss(ori_key_states, key_states, reduction='mean').item()
+            self.v_mse += torch.nn.functional.mse_loss(ori_value_states, value_states, reduction='mean').item()        
+            self.mse_cnt += 1
+            
         if past_key_value is not None:
             cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}  # Specific to RoPE models
             key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)

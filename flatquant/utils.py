@@ -13,6 +13,41 @@ torch.backends.cuda.matmul.allow_tf32 = False
 torch.backends.cudnn.allow_tf32 = False
 DEV = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
 
+def infer_accumulation_dtype(input_dtype: torch.dtype,
+                             device: torch.device,
+                             op: str = "matmul") -> torch.dtype:
+    """
+    Best-effort inference of accumulation dtype for common Torch ops.
+    Returns a torch.dtype that the reduction/accumulation most likely uses.
+    """
+    if device.type == "cuda":
+        if input_dtype in (torch.float16, torch.bfloat16):
+            # Default: Tensor Cores accumulate in FP32
+            # unless reduced-precision reduction is explicitly permitted.
+            if input_dtype is torch.float16 and torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction:
+                return torch.float16
+            if input_dtype is torch.bfloat16 and torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction:
+                return torch.bfloat16
+            return torch.float32
+
+        if input_dtype is torch.float32:
+            # TF32 affects *compute format* for F32 matmul/conv, not accumulator width.
+            # Accumulation remains FP32.
+            return torch.float32
+
+        if input_dtype in (torch.int8, torch.qint8):
+            # Quantized CUDA/kernels: int32 accumulation
+            return torch.int32
+
+    # CPU fallbacks / typical BLAS behavior
+    if device.type == "cpu":
+        if input_dtype in (torch.float16, torch.bfloat16, torch.float32):
+            return torch.float32
+        if input_dtype in (torch.int8, torch.qint8):
+            return torch.int32
+
+    # Sensible default if something exotic
+    return torch.float32
 
 def skip(*args, **kwargs):
     # This is a helper function to save time during the initialization! 

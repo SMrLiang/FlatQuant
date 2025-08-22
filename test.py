@@ -36,6 +36,8 @@ Out = 128       # output dim
 W = torch.randn(Out, In)
 X = torch.randn(B, In)
 
+
+
 # sprinkle some outliers to make rotation matter
 W[0, 0] += 10.0
 X[0, 0] += 12.0
@@ -43,6 +45,8 @@ X[0, 0] += 12.0
 # Baseline float output
 Y_fp = X @ W.T
 
+W_fp8 = W.to(torch.float8_e4m3fn).to(W.dtype)
+X_fp8 = X.to(torch.float8_e4m3fn).to(X.dtype)
 # --- quantize without rotation ---
 # per-tensor (set axis=None). For per-channel weight quant, use axis=1 (row-wise)
 W_q, _ = quantize_symmetric(W, num_bits=8, axis=None)
@@ -53,8 +57,9 @@ mse_wa = F.mse_loss(Y_wa_q, Y_fp).item()
 # --- apply rotations and quantize both weight & activation in rotated bases ---
 U = random_rotation(Out)     # output rotation
 V = random_rotation(In)      # input rotation
-
-W_rot = U @ W @ V.T
+print(U @U.T)
+print(V@V.T)
+W_rot = W @ V.T
 X_rot = X @ V.T
 
 # Quantize in rotated space (try per-channel weights along rows: axis=1)
@@ -63,8 +68,12 @@ X_rot_q, _ = quantize_symmetric(X_rot, num_bits=8, axis=None)
 
 # Compute output in rotated space then bring it back to original basis
 Y_rot_q = X_rot_q @ W_rot_q.T           # this equals (approximately) Y_fp @ U.T
-Y_rec = Y_rot_q @ U.T                   # back to original basis
+Y_rec = Y_rot_q                   # back to original basis
 mse_rot_wa = F.mse_loss(Y_rec, Y_fp).item()
+
+Y_fp8 = X_fp8 @ W_fp8.T
+mse_fp8 = F.mse_loss(Y_fp8, Y_fp).item()
 
 print(f"MSE (quantize W & X, no rotation): {mse_wa:.6f}")
 print(f"MSE (quantize W & X, with rotation): {mse_rot_wa:.6f}")
+print(f"MSE (fp8): {mse_fp8:.6f}")
